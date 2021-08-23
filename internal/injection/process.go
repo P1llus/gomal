@@ -9,33 +9,14 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func createProcess() *syscall.ProcessInformation {
-	var si syscall.StartupInfo
-	var pi syscall.ProcessInformation
-
-	commandLine, err := syscall.UTF16PtrFromString("C:\\Windows\\SysWOW64\\notepad.exe")
-
-	if err != nil {
-		panic(err)
+func createProcess() windows.ProcessInformation {
+	procInfo := &windows.ProcessInformation{}
+	startupInfo := &windows.StartupInfo{
+		Flags:      windows.STARTF_USESTDHANDLES | windows.CREATE_SUSPENDED,
+		ShowWindow: 1,
 	}
-
-	err = syscall.CreateProcess(
-		nil,
-		commandLine,
-		nil,
-		nil,
-		false,
-		windows.CREATE_SUSPENDED|windows.CREATE_NO_WINDOW,
-		nil,
-		nil,
-		&si,
-		&pi)
-
-	if err != nil {
-		panic(err)
-	}
-
-	return &pi
+	windows.CreateProcess(syscall.StringToUTF16Ptr("C:\\Windows\\System32\\notepad.exe"), syscall.StringToUTF16Ptr(""), nil, nil, true, windows.CREATE_SUSPENDED, nil, nil, startupInfo, procInfo)
+	return *procInfo
 }
 
 // unsafe.Sizeof(windows.ProcessEntry32{})
