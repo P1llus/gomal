@@ -22,6 +22,7 @@ var CreateRemoteThread *windows.LazyProc
 var CloseHandle *windows.LazyProc
 var GetCurrentThread *windows.LazyProc
 var RtlCreateUserThread *windows.LazyProc
+var CreateThread *windows.LazyProc
 var NtQueryInformationProcess *windows.LazyProc
 var ConvertThreadToFiber *windows.LazyProc
 var CreateFiber *windows.LazyProc
@@ -74,6 +75,7 @@ func init() {
 	CloseHandle = kernel32.NewProc("CloseHandle")
 	GetCurrentThread = kernel32.NewProc("GetCurrentThread")
 	RtlCreateUserThread = ntdll.NewProc("RtlCreateUserThread")
+	CreateThread = kernel32.NewProc("CreateThread")
 
 	// Fiber actions
 	ConvertThreadToFiber = kernel32.NewProc("ConvertThreadToFiber")

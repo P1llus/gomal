@@ -47,8 +47,8 @@ func createInjectionMenu() {
 	}
 	if res == "CreateRemoteThread" {
 		injection.CreateRemoteThreads()
-	} else if res == "CreateThreads" {
-		injection.CreateThread()
+	} else if res == "CreateThread" {
+		injection.CreateThreads()
 	} else if res == "CreateFiberThread" {
 		injection.CreateFiberThread()
 	} else if res == "CreateProcess" {

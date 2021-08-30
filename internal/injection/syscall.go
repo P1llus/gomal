@@ -3,7 +3,6 @@ package injection
 import (
 	"syscall"
 	"unsafe"
-	// Sub Repositories
 )
 
 func Syscall() {
